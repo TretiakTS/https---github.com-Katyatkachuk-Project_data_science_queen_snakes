@@ -2,6 +2,10 @@ import cv2
 import numpy as np
 import os
 import csv
+from sklearn.cluster import KMeans
+import pandas as pd
+from os.path import exists
+
 
 def extract_features(image,mask):
     # Initialize an array to store feature values
@@ -12,7 +16,7 @@ def extract_features(image,mask):
     features[0] = check_symmetry(mask)
     
     # Feature 2: Colours
-    #features[1] = measure_colours(image)
+    features[1] = color_analysis(image)
     
     # Feature 3: Dots and Globules
     features[2] = detect_dots(image,mask)
@@ -161,3 +165,68 @@ def calculate_compactness(image):
 
 
     return compactness
+
+
+def color_analysis(image):
+    """
+    Analyze the colors present in the input image.
+
+    Args:
+    - image (numpy.ndarray): Input image (RGB).
+
+    Returns:
+    - num_colors (int): Number of distinct colors present in the image.
+    """
+    # Apply KMeans clustering
+    kmeans = KMeans(n_clusters=6, random_state=0)
+    kmeans.fit(image.reshape(-1, 3))
+
+    # Filter out similar colors
+    _, counts = np.unique(kmeans.labels_, return_counts=True)
+    num_colors = len([count for count in counts if count >= 0.05 * image.size])
+
+    return num_colors
+
+def process_images(file_data, path_image, path_mask, feature_names):
+    
+    # Where we will store the features
+    file_features = 'features/features.xlsx'
+
+    # Read meta-data into a Pandas dataframe
+    df = pd.read_csv(file_data)
+
+    # Extract image IDs and labels from the data.
+    image_id = list(df['img_id'])
+    mask_id = [id.replace('.png', '_mask.png') for id in df['img_id']]
+
+
+    num_features = len(feature_names)
+    features = []
+    valid_image_ids = []
+
+    # Loop through all images (limited by num_images)
+    num_images = len(image_id)
+    for i in np.arange(num_images):
+        # Define filenames related to this image
+        file_image = path_image + os.sep + image_id[i]
+        file_image_mask = path_mask + os.sep + mask_id[i]
+
+        # Check if both the image and mask files exist
+        if exists(file_image) and exists(file_image_mask):
+            # Read the image and mask
+            im = cv2.imread(file_image)
+            mask = cv2.imread(file_image_mask, cv2.IMREAD_GRAYSCALE)
+
+            # Measure features
+            x = extract_features(im, mask)
+
+            # Store in the list we created before
+            features.append(x)
+
+            # Keep track of the valid image ID
+            valid_image_ids.append(image_id[i])
+
+    # Create DataFrame from the features list and add image IDs
+    df_features = pd.DataFrame(features, columns=feature_names)
+    df_features['image_id'] = valid_image_ids
+    return df_features
